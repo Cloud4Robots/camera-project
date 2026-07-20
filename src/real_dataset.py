@@ -23,9 +23,10 @@ import torch
 from PIL import Image
 from torch.utils.data import Dataset
 
+# if this is over 3 meters depth -- it is considered as a noise
 MAX_VALID_DEPTH_M = 3.0
 
-
+# cut the RGB and Ground Truth so that they are in the same size 
 def crop_720p_to_4_3(img: np.ndarray, is_depth: bool) -> np.ndarray:
     """Center-crop 1280x720 -> 960x720 (4:3), then resize to 640x480."""
     h, w = img.shape[:2]
@@ -45,7 +46,7 @@ def clip_invalid_depth(depth: np.ndarray, max_depth_m: float = MAX_VALID_DEPTH_M
 class RealDepthDataset(Dataset):
     """One sample = one (rgb, ir, gt) triple. Same tensor shapes/dtypes as
     SyntheticDepthDataset: rgb (3,H,W), ir (1,H,W), gt (1,H,W), all float32."""
-
+    # when three elements have the timestamp all together -- then it is consider as valid
     def __init__(self, root: str, augment: bool = False, base_seed: int = 0):
         self.root = Path(root)
         self.augment = augment
