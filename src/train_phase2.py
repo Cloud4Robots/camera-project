@@ -1,11 +1,16 @@
 """
 train_phase2.py - fine-tune Phase 1's model on real data, at native
-720x1280 resolution, across 15 objects.
+720x1280 resolution, across auto-discovered objects.
 
-3 objects are held out ENTIRELY as test (never trained on) -- real unseen
-scenes. The other 12 are pooled for train/val (80/20 split, done
-separately per object since adjacent frames within an object are near-
-duplicates and must not leak across the split).
+Objects are auto-discovered by scanning for ffs_depth subfolders anywhere
+under data_root -- no hardcoded names, so this keeps working whenever
+objects are added, renamed, or removed.
+
+N_TEST_OBJECTS objects are held out ENTIRELY as test (never trained on) --
+real unseen scenes, chosen as the smallest-by-frame-count objects so test
+evaluation stays fast. The rest are pooled for train/val (80/20 split,
+done separately per object since adjacent frames within an object are
+near-duplicates and must not leak across the split).
 
 Native res = ~9x the attention memory of the earlier 480x640 batch
 (CrossAttentionFusion cost scales with pixels^2). BATCH_SIZE=1 as a result.
@@ -34,21 +39,38 @@ PHASE1_CKPT = Path("checkpoints_phase1/best.pt")
 CKPT_DIR = Path("checkpoints_phase2")
 LOG_PATH = Path("phase2_loss_log.csv")
 
-# which objects go where -- change these two lists if you want a different split
-TEST_OBJECTS = ["05_foamandshirt", "07_SprayandWheel", "13_FoamRobotSpray"]
-TRAIN_VAL_OBJECTS = [
-    "01_clampjumpCoordsmeasureTapeRedRubberoutle", "02_Maskclampkeyboardspray",
-    "03_RobotTapeHolderCanSprayWoodBlockRobotPar", "04_robotclampredrubberthingwaterbottlehydro",
-    "06_HydroflaskTubeClampShirt", "08_Woodclampandcamerastand",
-    "09_TapeHolderMeasureTapeKeyboardChargingSta", "10_JumpClampscamerastandwoodblockwrench",
-    "11_ChargingStationCanJumperClampsWrench", "12_MaskKeyboardWoodBlock",
-    "14_LightingLeftsidemaxbrightnorightsideligh", "15_LightingLeftsidemaxbrightnorightsideligh",
-]
+# how many objects to hold out entirely as test (never trained on) --
+# picks the smallest N by frame count so test evaluation stays quick
+N_TEST_OBJECTS = 3
 
 TRAIN_FRAC = 0.80
 BATCH_SIZE, EPOCHS, LR = 1, 30, 1e-4  # LR lower than phase1: fine-tuning, not training from scratch
 LOSS_WEIGHTS = dict(alpha=1.0, beta=0.5, gamma=0.5)
 COMPONENTS = ("pixel", "grad", "ssim", "total")
+
+
+def discover_objects(root: Path) -> list[str]:
+    """Auto-detect object folders: any folder with a ffs_depth subfolder,
+    at any nesting depth. Returns folder names relative to root, sorted."""
+    ffs_dirs = list(root.rglob("ffs_depth"))
+    names = sorted({f.parent.relative_to(root) for f in ffs_dirs})
+    return [str(n) for n in names]
+
+
+def split_test_train_val(data_root: Path, n_test: int):
+    """Auto-split discovered objects into test / train+val, picking the
+    n_test smallest (by frame count) as test so evaluation stays quick."""
+    all_objects = discover_objects(data_root)
+    if len(all_objects) <= n_test:
+        raise RuntimeError(f"only {len(all_objects)} objects found, need more than {n_test} to hold any out for test")
+
+    def frame_count(name):
+        return len(list((data_root / name / "ffs_depth").glob("*.npz")))
+
+    ranked = sorted(all_objects, key=frame_count)
+    test_objects = ranked[:n_test]
+    train_val_objects = ranked[n_test:]
+    return test_objects, train_val_objects
 
 
 def sequential_split(n, train_frac):
@@ -80,11 +102,11 @@ def run_epoch(model, loader, criterion, optimizer, device, train, scaler=None):
     return {k: v / len(loader) for k, v in totals.items()}
 
 
-def build_train_val(data_root: Path):
+def build_train_val(data_root: Path, object_names: list[str]):
     """Split each train/val object sequentially on its own, then glue all
     the train pieces together and all the val pieces together."""
     train_parts, val_parts = [], []
-    for name in TRAIN_VAL_OBJECTS:
+    for name in object_names:
         obj_root = data_root / name
         train_ds = RealDepthDataset(obj_root, augment=True)   # augmented copy for training
         eval_ds = RealDepthDataset(obj_root, augment=False)    # clean copy for val
@@ -100,12 +122,18 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"device: {device}")
 
+    # --- auto-discover objects, split into test vs train/val ---
+    test_objects, train_val_objects = split_test_train_val(data_root, N_TEST_OBJECTS)
+    print(f"auto-discovered {len(test_objects) + len(train_val_objects)} objects total")
+    print(f"  test (held out): {test_objects}")
+    print(f"  train/val: {train_val_objects}")
+
     # --- data ---
-    print("building train/val (pooled across objects, sequential split per object):")
-    train_ds, val_ds = build_train_val(data_root)
+    print("\nbuilding train/val (pooled across objects, sequential split per object):")
+    train_ds, val_ds = build_train_val(data_root, train_val_objects)
     print(f"total: train={len(train_ds)} val={len(val_ds)}")
 
-    test_datasets = {name: RealDepthDataset(data_root / name, augment=False) for name in TEST_OBJECTS}
+    test_datasets = {name: RealDepthDataset(data_root / name, augment=False) for name in test_objects}
     for name, ds in test_datasets.items():
         print(f"held-out test object '{name}': {len(ds)} frames (never trained on)")
 
