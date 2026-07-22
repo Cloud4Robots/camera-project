@@ -44,7 +44,7 @@ LOG_PATH = Path("phase2_loss_log.csv")
 N_TEST_OBJECTS = 3
 
 TRAIN_FRAC = 0.80
-BATCH_SIZE, EPOCHS, LR = 1, 30, 1e-4  # LR lower than phase1: fine-tuning, not training from scratch
+BATCH_SIZE, EPOCHS, LR = 4, 5, 1e-4  # LR lower than phase1: fine-tuning, not training from scratch
 LOSS_WEIGHTS = dict(alpha=1.0, beta=0.5, gamma=0.5)
 COMPONENTS = ("pixel", "grad", "ssim", "total")
 
