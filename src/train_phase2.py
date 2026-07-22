@@ -54,7 +54,7 @@ LIGHTING_VARIANTS = [
 ]
 
 TRAIN_FRAC = 0.80
-BATCH_SIZE, EPOCHS, LR = 4, 30, 1e-4
+BATCH_SIZE, EPOCHS, LR = 1, 30, 1e-4
 LOSS_WEIGHTS = dict(alpha=1.0, beta=0.5, gamma=0.5)
 COMPONENTS = ("pixel", "grad", "ssim", "total")
 
