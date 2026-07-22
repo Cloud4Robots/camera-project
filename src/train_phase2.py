@@ -28,6 +28,7 @@ import re
 import sys
 import time
 from pathlib import Path
+from tqdm import tqdm
 
 import torch
 from torch.utils.data import ConcatDataset, DataLoader, Subset
@@ -107,7 +108,7 @@ def sequential_split(n, train_frac):
 def run_epoch(model, loader, criterion, optimizer, device, train, scaler=None):
     model.train(mode=train)
     totals = {k: 0.0 for k in COMPONENTS}
-    for rgb, ir, gt in loader:
+    for rgb, ir, gt in tqdm(loader, desc="train" if train else "val", leave=False):
         rgb, ir, gt = rgb.to(device), ir.to(device), gt.to(device)
         with torch.set_grad_enabled(train), torch.autocast(device_type=device.type, enabled=(device.type == "cuda")):
             loss, parts = criterion(model(rgb, ir), gt)
