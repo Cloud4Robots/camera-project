@@ -89,12 +89,14 @@ def main():
     print(f"held-out test recordings: {test_objects}\n")
 
     test_datasets = [RealDepthDataset(data_root / name, augment=False) for name in test_objects]
-    combined_loader = DataLoader(ConcatDataset(test_datasets), batch_size=1, shuffle=False)
+    combined_loader = DataLoader(ConcatDataset(test_datasets), batch_size=4, shuffle=False)
 
+    # --- Baseline A: raw IR, no model ---
     print("=== Baseline A: raw IR depth, no correction at all ===")
     m_a = compute_metrics_raw_ir(combined_loader, device)
     print_metrics("raw IR (uncorrected)", m_a)
 
+    # --- Baseline B: Phase 1 model (synthetic-only, never saw real data) ---
     print("\n=== Baseline B: Phase 1 model (trained only on synthetic data) ===")
     model1 = DepthCorrectionNet().to(device)
     ckpt1 = torch.load(PHASE1_CKPT, map_location=device)
