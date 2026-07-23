@@ -29,31 +29,30 @@ import sys
 from pathlib import Path
 
 import torch
-from torch.utils.data import DataLoader
+from torch.utils.data import ConcatDataset, DataLoader
 
 from depth_correction_model import DepthCorrectionNet
 from real_dataset import RealDepthDataset
 from train_phase2 import N_TEST_GROUPS, split_test_train_val
 
 CKPT_PATH = Path("checkpoints_phase2/best.pt")
-EPS = 1e-6  # avoids divide-by-zero on the (already-excluded) invalid pixels
+EPS = 1e-6
 
 
 @torch.no_grad()
 def compute_metrics(model, loader, device):
-    """Accumulate metrics over every batch, weighted by valid pixel count
-    (not by batch count) so images with more/fewer valid pixels are
-    weighted fairly."""
+    """Accumulate metrics over every batch, weighted by valid pixel count."""
     total_abs_err = total_sq_err = total_rel_err = 0.0
     total_delta1 = total_delta2 = total_delta3 = 0.0
     total_valid_px = 0
 
     for rgb, ir, gt in loader:
         rgb, ir, gt = rgb.to(device), ir.to(device), gt.to(device)
-        pred = model(rgb, ir)
+        with torch.autocast(device_type=device.type, enabled=(device.type == "cuda")):
+            pred = model(rgb, ir)
 
-        valid = gt > 0  # exclude invalid/unmeasured pixels
-        pred_v, gt_v = pred[valid], gt[valid]
+        valid = gt > 0
+        pred_v, gt_v = pred[valid].float(), gt[valid].float()
         n = pred_v.numel()
         if n == 0:
             continue
@@ -114,14 +113,13 @@ def main():
     print("--- per-recording metrics (held-out test group) ---")
     for name in test_objects:
         ds = RealDepthDataset(data_root / name, augment=False)
-        loader = DataLoader(ds, batch_size=4, shuffle=False)
+        loader = DataLoader(ds, batch_size=1, shuffle=False)
         m = compute_metrics(model, loader, device)
         print_metrics(name, m)
 
-    # combined metrics across all held-out recordings, pixel-weighted
     print("\n--- combined across all held-out test recordings ---")
     all_datasets = [RealDepthDataset(data_root / name, augment=False) for name in test_objects]
-    combined_loader = DataLoader(torch.utils.data.ConcatDataset(all_datasets), batch_size=4, shuffle=False)
+    combined_loader = DataLoader(ConcatDataset(all_datasets), batch_size=1, shuffle=False)
     m = compute_metrics(model, combined_loader, device)
     print_metrics("ALL", m)
 
